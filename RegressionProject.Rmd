@@ -1,0 +1,221 @@
+---
+title: Regression Project
+author: Connor Spencer, Lucas Koscho, Vishnu Jariwala
+date: April 28th, 2025
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+I pledge my honor that I have abided by the Stevens Honor System.
+
+```{r}
+# Set seed
+CWID = 20030846
+personal = CWID %% 10000
+set.seed(personal)
+
+# Load required packages
+library(leaps)
+
+# Load the data
+insurance = read.csv('insurance.csv')
+
+# Convert categories to factors
+insurance$Region = as.factor(insurance$Region)
+insurance$CarType = as.factor(insurance$CarType)
+insurance$FuelType = as.factor(insurance$FuelType)
+insurance$MaritalStatus = as.factor(insurance$MaritalStatus)
+
+# Visualize data
+summary(insurance)
+```
+
+
+```{r}
+# Function for k-fold splitting
+kfold = function(insuranceTest) {
+  # Shuffle data
+  insuranceTest = insuranceTest[sample(nrow(insuranceTest)), ]
+  
+  # Create 10 equally sized folds
+  folds = cut(seq(1, nrow(insuranceTest)), breaks = 10, labels = FALSE)
+  
+  # Initialize list to store data for each fold
+  fold_data = list()
+  
+  # Perform cross validation
+  for (i in 1:10) {
+    # Segment data by fold
+    testIndexes = which(folds == i, arr.ind = TRUE)
+    test_data = insuranceTest[testIndexes, ]
+    train_data = insuranceTest[-testIndexes, ]
+    
+    # Store train and test data for each fold
+    fold_data[[i]] = list(train_data = train_data, test_data = test_data)
+  }
+  return(fold_data)
+}
+```
+
+```{r}
+# Use k-fold splitting on insurance data
+split_data = kfold(insurance)
+
+# View training and test data for first fold
+summary(split_data[[1]]$train_data)
+summary(split_data[[1]]$test_data)
+```
+
+```{r}
+# Store all full models
+full_models = list()
+
+# Initialize R-squared for full model
+R_squared_full = numeric(length(split_data))
+
+# Initialize AIC for full model
+AIC_full = numeric(length(split_data))
+
+# Initialize RMSE for full model
+rmse_full = numeric(length(split_data))
+
+# Access training and test data for each fold
+for (i in 1:length(split_data)) {
+  train_data = split_data[[i]]$train_data
+  test_data = split_data[[i]]$test_data
+  
+  # Fit full model using all predictors
+  full_model = lm(AnnualPremium ~ ., data = train_data)
+  full_models[[i]] = full_model
+  R_squared_full[i] = summary(full_model)$adj.r.squared
+  AIC_full[i] = AIC(full_model)
+  
+  # Test full model against test data
+  pred_test_full = predict(full_model, newdata = test_data)
+  rmse_full[i] = sqrt(mean((pred_test_full-test_data$AnnualPremium)^2))
+}
+summary(full_models[[1]])
+```
+
+```{r}
+# Store all stepwise models
+step_models = list()
+
+# Initialize R-squared for stepwise model
+R_squared_step = numeric(length(split_data))
+
+# Initialize AIC for stepwise model
+AIC_step = numeric(length(split_data))
+
+# Initialize RMSE for stepwise model
+rmse_step = numeric(length(split_data))
+
+# Access training and test data for each fold
+for (i in 1:length(split_data)) {
+  train_data = split_data[[i]]$train_data
+  test_data = split_data[[i]]$test_data
+  
+  # Fit full model using all predictors
+  full_model = lm(AnnualPremium ~ ., data = train_data)
+  
+   # Stepwise selection
+  step_model = step(full_model, direction = 'both', trace = FALSE)
+  step_models[[i]] = step_model
+  R_squared_step[i] = summary(step_model)$adj.r.squared
+  AIC_step[i] = AIC(step_model)
+  
+  # Test stepwise model against test data
+  pred_test_step = predict(step_model, newdata = test_data)
+  rmse_step[i] = sqrt(mean((pred_test_step-test_data$AnnualPremium)^2))
+}
+summary(step_models[[1]])
+```
+
+```{r}
+# Store all selected models
+models_selected = list()
+
+# Initialize R-squared for selected model
+R_squared_select = numeric(length(split_data))
+
+# Initialize AIC for selected model
+AIC_select = numeric(length(split_data))
+
+# Initialize RMSE for selected model
+rmse_select = numeric(length(split_data))
+
+# Access training and test data for each fold
+for (i in 1:length(split_data)) {
+  train_data = split_data[[i]]$train_data
+  test_data = split_data[[i]]$test_data
+  
+  # Regsubsets to find best subset of predictors
+  subset_model = regsubsets(AnnualPremium ~ ., data = train_data, nvmax = ncol(train_data)-1)
+  reg_summary = summary(subset_model)
+  num_predictors = which.max(reg_summary$adjr2)
+  
+  # Find which predictors were selected
+  selected_predict = names(which(reg_summary$which[num_predictors, -1]))
+  selected_predict = selected_predict[selected_predict %in% names(train_data)]
+  
+  # Refit model using selected predictors
+  formula_selected = as.formula(paste('AnnualPremium ~', paste(selected_predict, collapse = ' + ')))
+  model_selected = lm(formula_selected, data = train_data)
+  models_selected[[i]] = model_selected
+  R_squared_select[i] = summary(model_selected)$adj.r.squared
+  AIC_select[i] = AIC(model_selected)
+
+  # Test selected model against test data
+  pred_test_select = predict(model_selected, newdata = test_data)
+  rmse_select[i] = sqrt(mean((pred_test_select-test_data$AnnualPremium)^2))
+}
+summary(models_selected[[1]])
+```
+
+```{r}
+# Compare R-squared across models
+mean(R_squared_full)
+mean(R_squared_step)
+mean(R_squared_select)
+print('')
+
+# Compare AIC across models
+mean(AIC_full)
+mean(AIC_step)
+mean(AIC_select)
+print('')
+
+# Compare RMSE across models
+mean(rmse_full)
+mean(rmse_step)
+mean(rmse_select)
+```
+
+### The Stepwise Selection Model has the highest R-squared value (0.8291), the lowest AIC (3974.43), and the second lowest root Mean Squared Error (136.27). Therefore, we will be using this as our model.
+
+```{r}
+# Residual Plot
+plot(
+  step_models[[1]]$fitted.values,
+  step_models[[1]]$residuals,
+  xlab = "Fitted Values",
+  ylab = "Residuals",
+  main = "Residuals vs Fitted Values",
+  pch = 20,
+  col = "blue"
+)
+abline(h = 0, lty = 2, col = "red")
+```
+
+Since our residuals on the graph create no pattern, it tells us that our linearity and variance of our model is accurate.
+
+```{r}
+# QQ Plot
+qqnorm(step_models[[1]]$residuals, pch = 20, main = "Normal Q-Q Plot")
+qqline(step_models[[1]]$residuals, col = "red", lwd = 2)
+```
+
+The plot follows a mostly straight line, with only slight deviations at the tails, indicating that there is normality among our residuals.
